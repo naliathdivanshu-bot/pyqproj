@@ -13,7 +13,6 @@ Respond with ONLY valid JSON matching exactly this schema:
 Keep the paper realistic in length for the subject and level. Output must be valid parseable JSON and nothing else.`;
 
 export async function GET() {
-  // Returns your most recent sessions from Supabase (for a "history" list).
   try {
     const supabaseAdmin = getSupabaseAdmin();
     if (!supabaseAdmin) {
@@ -52,7 +51,7 @@ export async function POST(request) {
     const userPrompt = `Class/Grade: ${classGrade || 'Not specified'}\nSubject: ${subject || 'Not specified'}\nBatch/Module: ${batch || 'Not specified'}\n\nPrevious year questions:\n${pyqText}`;
 
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
       {
         method: 'POST',
         headers: {
@@ -104,7 +103,6 @@ export async function POST(request) {
       parsed = JSON.parse(clean.slice(start, end + 1));
     }
 
-    // Persist to Supabase (storage). Non-fatal if this fails.
     let sessionId = null;
     const supabaseAdmin = getSupabaseAdmin();
     if (supabaseAdmin) {
