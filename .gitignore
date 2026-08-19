@@ -1,23 +1,6 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.venv/
-venv/
-env/
-
-# Node
 node_modules/
-
-# Environment
+.next/
 .env
-.env.*
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
+.env.local
+.vercel
+*.log
