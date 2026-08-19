@@ -7,7 +7,7 @@ Given a set of PYQs with class/grade, subject and batch/module, do three things:
 2. Group ALL given questions by topic.
 3. Rank the questions most likely to reappear, with a short reason.
 
-Respond with ONLY minified JSON (no markdown fences, no preamble) matching exactly this schema:
+Respond with ONLY valid JSON matching exactly this schema:
 {"subject_summary":"2-3 sentence summary of patterns you noticed","predicted_paper":{"title":"string","total_marks":number,"duration":"string e.g. 3 Hours","general_instructions":["string"],"sections":[{"name":"string","instructions":"string, brief","questions":[{"number":number,"text":"string","marks":number}]}]},"topic_wise":[{"topic":"string","question_count":number,"questions":["string"]}],"highly_predicted":[{"question":"string","topic":"string","confidence":"Very High|High|Medium","reason":"string, max 20 words"}]}
 
 Keep the paper realistic in length for the subject and level. Output must be valid parseable JSON and nothing else.`;
@@ -45,40 +45,55 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Please paste at least a few previous year questions.' }, { status: 400 });
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return NextResponse.json({ error: 'Server is missing ANTHROPIC_API_KEY. Add it in Vercel project settings.' }, { status: 500 });
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json({ error: 'Server is missing GEMINI_API_KEY. Add it in Vercel project settings.' }, { status: 500 });
     }
 
     const userPrompt = `Class/Grade: ${classGrade || 'Not specified'}\nSubject: ${subject || 'Not specified'}\nBatch/Module: ${batch || 'Not specified'}\n\nPrevious year questions:\n${pyqText}`;
 
-    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    });
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: SYSTEM_PROMPT }],
+          },
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: userPrompt }],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            maxOutputTokens: 4000,
+          },
+        }),
+      }
+    );
 
-    if (!anthropicRes.ok) {
-      const errText = await anthropicRes.text();
-      console.error('Anthropic API error:', errText);
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error('Gemini API error:', errText);
       return NextResponse.json({ error: 'The AI engine could not be reached. Please try again.' }, { status: 502 });
     }
 
-    const data = await anthropicRes.json();
-    const textBlock = (data.content || []).find((c) => c.type === 'text');
-    if (!textBlock) {
+    const data = await geminiRes.json();
+    const text = (data.candidates || [])
+      .flatMap((candidate) => candidate.content?.parts || [])
+      .map((part) => part.text || '')
+      .join('')
+      .trim();
+
+    if (!text) {
       return NextResponse.json({ error: 'The AI engine returned an empty response.' }, { status: 502 });
     }
 
-    let clean = textBlock.text.trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+    let clean = text.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
     let parsed;
     try {
       parsed = JSON.parse(clean);
