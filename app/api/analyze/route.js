@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
+import pdfParse from 'pdf-parse';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 const SYSTEM_PROMPT = `You are an expert exam analyst who studies previous year question papers (PYQs) for Indian school, college and competitive exams, and predicts likely future papers.
 Given a set of PYQs with class/grade, subject and batch/module, do three things:
@@ -15,9 +19,8 @@ Keep the paper realistic in length for the subject and level. Output must be val
 export async function GET() {
   try {
     const supabaseAdmin = getSupabaseAdmin();
-    if (!supabaseAdmin) {
-      return NextResponse.json({ sessions: [] });
-    }
+    if (!supabaseAdmin) return NextResponse.json({ sessions: [] });
+
     const { data, error } = await supabaseAdmin
       .from('pyq_sessions')
       .select('id, class_grade, subject, batch, created_at')
@@ -34,39 +37,66 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const body = await request.json();
-    const classGrade = (body.classGrade || '').trim();
-    const subject = (body.subject || '').trim();
-    const batch = (body.batch || '').trim();
-    const pyqText = (body.pyqText || '').trim();
+    let classGrade = '';
+    let subject = '';
+    let batch = '';
+    let pyqText = '';
+
+    const contentType = request.headers.get('content-type') || '';
+
+    if (contentType.includes('multipart/form-data')) {
+      const form = await request.formData();
+      classGrade = String(form.get('classGrade') || '').trim();
+      subject = String(form.get('subject') || '').trim();
+      batch = String(form.get('batch') || '').trim();
+
+      const file = form.get('pdf');
+      if (file && typeof file === 'object' && 'arrayBuffer' in file) {
+        if (file.type !== 'application/pdf') {
+          return NextResponse.json({ error: 'Please upload a PDF file.' }, { status: 400 });
+        }
+        if (file.size > 4 * 1024 * 1024) {
+          return NextResponse.json({ error: 'PDF is too large. Please use a PDF smaller than 4 MB.' }, { status: 400 });
+        }
+
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const parsedPdf = await pdfParse(buffer);
+        pyqText = (parsedPdf.text || '').trim();
+
+        if (!pyqText) {
+          return NextResponse.json({
+            error: 'I could not extract readable text from this PDF. Try a text-based PDF or paste the questions manually.'
+          }, { status: 422 });
+        }
+      }
+
+      pyqText = String(form.get('pyqText') || pyqText).trim();
+    } else {
+      const body = await request.json();
+      classGrade = (body.classGrade || '').trim();
+      subject = (body.subject || '').trim();
+      batch = (body.batch || '').trim();
+      pyqText = (body.pyqText || '').trim();
+    }
 
     if (!pyqText) {
-      return NextResponse.json({ error: 'Please paste at least a few previous year questions.' }, { status: 400 });
+      return NextResponse.json({ error: 'Upload a PYQ PDF or paste at least a few previous year questions.' }, { status: 400 });
     }
 
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json({ error: 'Server is missing GEMINI_API_KEY. Add it in Vercel project settings.' }, { status: 500 });
     }
 
-    const userPrompt = `Class/Grade: ${classGrade || 'Not specified'}\nSubject: ${subject || 'Not specified'}\nBatch/Module: ${batch || 'Not specified'}\n\nPrevious year questions:\n${pyqText}`;
+    const userPrompt = `Class/Grade: ${classGrade || 'Not specified'}\nSubject: ${subject || 'Not specified'}\nBatch/Module: ${batch || 'Not specified'}\n\nPrevious year questions extracted from the user's input/PDF:\n${pyqText}`;
 
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: SYSTEM_PROMPT }],
-          },
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: userPrompt }],
-            },
-          ],
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
           generationConfig: {
             responseMimeType: 'application/json',
             maxOutputTokens: 4000,
