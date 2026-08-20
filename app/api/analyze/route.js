@@ -5,6 +5,8 @@ import pdfParse from 'pdf-parse';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+const MODEL = 'gemini-3.6-flash';
+
 const SYSTEM_PROMPT = `You are an expert exam analyst who studies previous year question papers (PYQs) for Indian school, college and competitive exams, and predicts likely future papers.
 Given a set of PYQs with class/grade, subject and batch/module, do three things:
 1. Produce ONE predicted question paper in the typical format for that subject/level (sections, marks, total marks, duration), using patterns from the given PYQs plus your own knowledge of the subject's exam conventions.
@@ -15,6 +17,35 @@ Respond with ONLY valid JSON matching exactly this schema:
 {"subject_summary":"2-3 sentence summary of patterns you noticed","predicted_paper":{"title":"string","total_marks":number,"duration":"string e.g. 3 Hours","general_instructions":["string"],"sections":[{"name":"string","instructions":"string, brief","questions":[{"number":number,"text":"string","marks":number}]}]},"topic_wise":[{"topic":"string","question_count":number,"questions":["string"]}],"highly_predicted":[{"question":"string","topic":"string","confidence":"Very High|High|Medium","reason":"string, max 20 words"}]}
 
 Keep the paper realistic in length for the subject and level. Output must be valid parseable JSON and nothing else.`;
+
+const PDF_EXTRACT_PROMPT = `Extract ALL readable content from this question-paper PDF, especially every previous-year question. This may be a scanned/image-only PDF, so use visual understanding/OCR when necessary. Preserve question wording, numbering, section names, marks, and year labels when visible. Do not summarize, omit, or invent questions. Return plain text only, with one question or meaningful line per line.`;
+
+async function geminiText(parts, generationConfig = {}) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig,
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('Gemini API error:', errText);
+    throw new Error('The AI engine could not be reached. Please try again.');
+  }
+
+  const data = await res.json();
+  return (data.candidates || [])
+    .flatMap((candidate) => candidate.content?.parts || [])
+    .map((part) => part.text || '')
+    .join('')
+    .trim();
+}
 
 export async function GET() {
   try {
@@ -42,6 +73,10 @@ export async function POST(request) {
     let batch = '';
     let pyqText = '';
 
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json({ error: 'Server is missing GEMINI_API_KEY. Add it in Vercel project settings.' }, { status: 500 });
+    }
+
     const contentType = request.headers.get('content-type') || '';
 
     if (contentType.includes('multipart/form-data')) {
@@ -60,17 +95,35 @@ export async function POST(request) {
         }
 
         const buffer = Buffer.from(await file.arrayBuffer());
-        const parsedPdf = await pdfParse(buffer);
-        pyqText = (parsedPdf.text || '').trim();
 
-        if (!pyqText) {
-          return NextResponse.json({
-            error: 'I could not extract readable text from this PDF. Try a text-based PDF or paste the questions manually.'
-          }, { status: 422 });
+        // Fast path for normal digital/text PDFs.
+        try {
+          const parsedPdf = await pdfParse(buffer);
+          pyqText = (parsedPdf.text || '').trim();
+        } catch (pdfError) {
+          console.warn('Normal PDF parsing failed; falling back to Gemini PDF vision:', pdfError);
         }
-      }
 
-      pyqText = String(form.get('pyqText') || pyqText).trim();
+        // OCR/vision fallback for scanned or image-only PDFs.
+        if (!pyqText || pyqText.replace(/\s/g, '').length < 40) {
+          const pdfBase64 = buffer.toString('base64');
+          pyqText = await geminiText([
+            { text: PDF_EXTRACT_PROMPT },
+            { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } },
+          ]);
+
+          if (!pyqText) {
+            return NextResponse.json({ error: 'I could not extract readable questions from this PDF. Please try another PDF.' }, { status: 422 });
+          }
+        }
+
+        const pastedText = String(form.get('pyqText') || '').trim();
+        if (pastedText) {
+          pyqText = `${pyqText}\n\nAdditional questions pasted by user:\n${pastedText}`;
+        }
+      } else {
+        pyqText = String(form.get('pyqText') || '').trim();
+      }
     } else {
       const body = await request.json();
       classGrade = (body.classGrade || '').trim();
@@ -83,40 +136,12 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Upload a PYQ PDF or paste at least a few previous year questions.' }, { status: 400 });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ error: 'Server is missing GEMINI_API_KEY. Add it in Vercel project settings.' }, { status: 500 });
-    }
-
     const userPrompt = `Class/Grade: ${classGrade || 'Not specified'}\nSubject: ${subject || 'Not specified'}\nBatch/Module: ${batch || 'Not specified'}\n\nPrevious year questions extracted from the user's input/PDF:\n${pyqText}`;
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            maxOutputTokens: 4000,
-          },
-        }),
-      }
+    const text = await geminiText(
+      [{ text: SYSTEM_PROMPT }, { text: userPrompt }],
+      { responseMimeType: 'application/json', maxOutputTokens: 4000 }
     );
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error('Gemini API error:', errText);
-      return NextResponse.json({ error: 'The AI engine could not be reached. Please try again.' }, { status: 502 });
-    }
-
-    const data = await geminiRes.json();
-    const text = (data.candidates || [])
-      .flatMap((candidate) => candidate.content?.parts || [])
-      .map((part) => part.text || '')
-      .join('')
-      .trim();
 
     if (!text) {
       return NextResponse.json({ error: 'The AI engine returned an empty response.' }, { status: 502 });
@@ -148,11 +173,8 @@ export async function POST(request) {
         .select('id')
         .single();
 
-      if (dbError) {
-        console.error('Supabase insert failed:', dbError.message);
-      } else {
-        sessionId = inserted.id;
-      }
+      if (dbError) console.error('Supabase insert failed:', dbError.message);
+      else sessionId = inserted.id;
     }
 
     return NextResponse.json({ result: parsed, sessionId });
