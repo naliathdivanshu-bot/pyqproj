@@ -37,10 +37,7 @@ export default function Home() {
         formData.append('pdf', pdfFile);
         if (pyqText.trim()) formData.append('pyqText', pyqText);
 
-        res = await fetch('/api/analyze', {
-          method: 'POST',
-          body: formData,
-        });
+        res = await fetch('/api/analyze', { method: 'POST', body: formData });
       } else {
         res = await fetch('/api/analyze', {
           method: 'POST',
@@ -83,11 +80,7 @@ export default function Home() {
         <span className="code">{formCode}</span>
         <h1>PYQ Predictor</h1>
         <p>Upload or paste previous year questions · get an AI-predicted paper</p>
-        {result && (
-          <div>
-            <span className="stamp">Analysis Complete</span>
-          </div>
-        )}
+        {result && <div><span className="stamp">Analysis Complete</span></div>}
       </div>
 
       <div className="card">
@@ -95,33 +88,15 @@ export default function Home() {
         <div className="field-row">
           <div>
             <label htmlFor="classGrade">Class / Grade</label>
-            <input
-              type="text"
-              id="classGrade"
-              placeholder="e.g. Class 10, B.Sc 2nd Year"
-              value={classGrade}
-              onChange={(e) => setClassGrade(e.target.value)}
-            />
+            <input type="text" id="classGrade" placeholder="e.g. Class 10, B.Sc 2nd Year" value={classGrade} onChange={(e) => setClassGrade(e.target.value)} />
           </div>
           <div>
             <label htmlFor="subject">Subject</label>
-            <input
-              type="text"
-              id="subject"
-              placeholder="e.g. Physics, Data Structures"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-            />
+            <input type="text" id="subject" placeholder="e.g. Physics, Data Structures" value={subject} onChange={(e) => setSubject(e.target.value)} />
           </div>
           <div>
             <label htmlFor="batch">Batch / Module (optional)</label>
-            <input
-              type="text"
-              id="batch"
-              placeholder="e.g. Batch 2026, Module 4"
-              value={batch}
-              onChange={(e) => setBatch(e.target.value)}
-            />
+            <input type="text" id="batch" placeholder="e.g. Batch 2026, Module 4" value={batch} onChange={(e) => setBatch(e.target.value)} />
           </div>
         </div>
 
@@ -129,28 +104,16 @@ export default function Home() {
           <div className="pdf-upload-head">
             <div>
               <label htmlFor="pdfFile">Upload PYQ PDF</label>
-              <div className="pdf-subtext">Text-based PDF · maximum 4 MB</div>
+              <div className="pdf-subtext">Works with text PDFs and scanned/image PDFs using AI OCR · maximum 4 MB</div>
             </div>
             <span className="pdf-or">OR</span>
             <label className="file-button" htmlFor="pdfFile">Choose PDF</label>
           </div>
-          <input
-            id="pdfFile"
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={handlePdfChange}
-            hidden
-          />
+          <input id="pdfFile" type="file" accept="application/pdf,.pdf" onChange={handlePdfChange} hidden />
           {pdfFile && (
             <div className="file-selected">
               <span>📄 {pdfFile.name}</span>
-              <button
-                type="button"
-                className="remove-file"
-                onClick={() => setPdfFile(null)}
-              >
-                Remove
-              </button>
+              <button type="button" className="remove-file" onClick={() => setPdfFile(null)}>Remove</button>
             </div>
           )}
         </div>
@@ -161,9 +124,7 @@ export default function Home() {
           <label htmlFor="pyqText">Previous year questions</label>
           <textarea
             id="pyqText"
-            placeholder={
-              'One question per line. Add the year in [brackets] if you know it, e.g.\n[2023] State and explain Newton\'s second law of motion.\n[2022] Derive the equation of motion for uniform acceleration.'
-            }
+            placeholder={'One question per line. Add the year in [brackets] if you know it, e.g.\n[2023] State and explain Newton\'s second law of motion.\n[2022] Derive the equation of motion for uniform acceleration.'}
             value={pyqText}
             onChange={(e) => setPyqText(e.target.value)}
           />
@@ -171,17 +132,9 @@ export default function Home() {
         </div>
 
         <div className="actions">
-          <button className="btn-primary" onClick={handleGenerate} disabled={loading}>
-            {loading ? 'Analyzing…' : 'Analyze & Predict'}
-          </button>
-          <button className="btn-ghost" onClick={handleReset}>
-            Start over
-          </button>
-          {loading && (
-            <div className="status-box">
-              <span className="spinner"></span> Extracting questions and analyzing patterns…
-            </div>
-          )}
+          <button className="btn-primary" onClick={handleGenerate} disabled={loading}>{loading ? 'Analyzing…' : 'Analyze & Predict'}</button>
+          <button className="btn-ghost" onClick={handleReset}>Start over</button>
+          {loading && <div className="status-box"><span className="spinner"></span> Reading PDF (including scanned pages) and analyzing patterns…</div>}
         </div>
         {error && <div className="error-box">{error}</div>}
       </div>
@@ -189,41 +142,17 @@ export default function Home() {
       {result && (
         <div>
           <div className="tabs" role="tablist">
-            <button
-              className={'tab-btn' + (activeTab === 'paper' ? ' active' : '')}
-              onClick={() => setActiveTab('paper')}
-            >
-              Predicted Paper
-            </button>
-            <button
-              className={'tab-btn' + (activeTab === 'topics' ? ' active' : '')}
-              onClick={() => setActiveTab('topics')}
-            >
-              Topic-wise
-            </button>
-            <button
-              className={'tab-btn' + (activeTab === 'highly' ? ' active' : '')}
-              onClick={() => setActiveTab('highly')}
-            >
-              Highly Predicted
-            </button>
+            <button className={'tab-btn' + (activeTab === 'paper' ? ' active' : '')} onClick={() => setActiveTab('paper')}>Predicted Paper</button>
+            <button className={'tab-btn' + (activeTab === 'topics' ? ' active' : '')} onClick={() => setActiveTab('topics')}>Topic-wise</button>
+            <button className={'tab-btn' + (activeTab === 'highly' ? ' active' : '')} onClick={() => setActiveTab('highly')}>Highly Predicted</button>
           </div>
-
-          <div className="tab-panel" hidden={activeTab !== 'paper'}>
-            <PredictedPaperTab result={result} />
-          </div>
-          <div className="tab-panel" hidden={activeTab !== 'topics'}>
-            <TopicsTab result={result} />
-          </div>
-          <div className="tab-panel" hidden={activeTab !== 'highly'}>
-            <HighlyPredictedTab result={result} />
-          </div>
+          <div className="tab-panel" hidden={activeTab !== 'paper'}><PredictedPaperTab result={result} /></div>
+          <div className="tab-panel" hidden={activeTab !== 'topics'}><TopicsTab result={result} /></div>
+          <div className="tab-panel" hidden={activeTab !== 'highly'}><HighlyPredictedTab result={result} /></div>
         </div>
       )}
 
-      <footer>
-        AI-generated predictions based on patterns in the PYQs you provide — always cross-check with your syllabus before relying on it.
-      </footer>
+      <footer>AI-generated predictions based on patterns in the PYQs you provide — always cross-check with your syllabus before relying on it.</footer>
     </div>
   );
 }
@@ -235,28 +164,15 @@ function PredictedPaperTab({ result }) {
     <div className="paper-sheet">
       <div className="paper-head">
         <h3>{p.title || 'Predicted Question Paper'}</h3>
-        <div className="paper-meta">
-          <span>TIME: {p.duration || '—'}</span>
-          <span>MAX MARKS: {p.total_marks ?? '—'}</span>
-        </div>
+        <div className="paper-meta"><span>TIME: {p.duration || '—'}</span><span>MAX MARKS: {p.total_marks ?? '—'}</span></div>
       </div>
       {result.subject_summary && <div className="summary-box">{result.subject_summary}</div>}
-      {p.general_instructions && p.general_instructions.length > 0 && (
-        <ol className="instructions">
-          {p.general_instructions.map((instr, i) => <li key={i}>{instr}</li>)}
-        </ol>
-      )}
+      {p.general_instructions && p.general_instructions.length > 0 && <ol className="instructions">{p.general_instructions.map((instr, i) => <li key={i}>{instr}</li>)}</ol>}
       {sections.map((sec, sIdx) => (
         <div className="section-block" key={sIdx}>
           <h4>{sec.name || 'Section'}</h4>
           {sec.instructions && <div className="section-instr">{sec.instructions}</div>}
-          {(sec.questions || []).map((q, qIdx) => (
-            <div className="q-row" key={qIdx}>
-              <span className="q-num">Q{q.number ?? ''}.</span>
-              <span className="q-text">{q.text}</span>
-              <span className="q-marks">[{q.marks ?? '—'}]</span>
-            </div>
-          ))}
+          {(sec.questions || []).map((q, qIdx) => <div className="q-row" key={qIdx}><span className="q-num">Q{q.number ?? ''}.</span><span className="q-text">{q.text}</span><span className="q-marks">[{q.marks ?? '—'}]</span></div>)}
         </div>
       ))}
     </div>
@@ -266,42 +182,11 @@ function PredictedPaperTab({ result }) {
 function TopicsTab({ result }) {
   const topics = result.topic_wise || [];
   if (!topics.length) return <p>No topic breakdown available.</p>;
-  return (
-    <>
-      {topics.map((t, idx) => (
-        <details className="topic-card" key={idx} open={idx === 0}>
-          <summary>
-            <span>{t.topic || 'Topic'}</span>
-            <span className="topic-count">{t.question_count ?? (t.questions || []).length} Qs</span>
-          </summary>
-          <ul className="topic-q-list">
-            {(t.questions || []).map((q, qi) => <li key={qi}>{q}</li>)}
-          </ul>
-        </details>
-      ))}
-    </>
-  );
+  return <>{topics.map((t, idx) => <details className="topic-card" key={idx} open={idx === 0}><summary><span>{t.topic || 'Topic'}</span><span className="topic-count">{t.question_count ?? (t.questions || []).length} Qs</span></summary><ul className="topic-q-list">{(t.questions || []).map((q, qi) => <li key={qi}>{q}</li>)}</ul></details>)}</>;
 }
 
 function HighlyPredictedTab({ result }) {
   const items = result.highly_predicted || [];
   if (!items.length) return <p>No highly predicted questions available.</p>;
-  return (
-    <>
-      {items.map((it, idx) => {
-        const confKey = (it.confidence || '').toLowerCase().replace(/\s+/g, '');
-        const confClass = confKey === 'veryhigh' ? 'conf-veryhigh' : confKey === 'high' ? 'conf-high' : 'conf-medium';
-        return (
-          <div className="predict-card" key={idx}>
-            <div className="predict-top">
-              <div className="predict-q">{it.question}</div>
-              <div className={'confidence-badge ' + confClass}>{it.confidence || 'Medium'}</div>
-            </div>
-            {it.reason && <div className="predict-reason">{it.reason}</div>}
-            {it.topic && <span className="topic-pill">{it.topic}</span>}
-          </div>
-        );
-      })}
-    </>
-  );
+  return <>{items.map((it, idx) => { const confKey = (it.confidence || '').toLowerCase().replace(/\s+/g, ''); const confClass = confKey === 'veryhigh' ? 'conf-veryhigh' : confKey === 'high' ? 'conf-high' : 'conf-medium'; return <div className="predict-card" key={idx}><div className="predict-top"><div className="predict-q">{it.question}</div><div className={'confidence-badge ' + confClass}>{it.confidence || 'Medium'}</div></div>{it.reason && <div className="predict-reason">{it.reason}</div>}{it.topic && <span className="topic-pill">{it.topic}</span>}</div>; })}</>;
 }
