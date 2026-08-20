@@ -16,7 +16,7 @@ Given a set of PYQs with class/grade, subject and batch/module, do three things:
 Respond with ONLY valid JSON matching exactly this schema:
 {"subject_summary":"2-3 sentence summary of patterns you noticed","predicted_paper":{"title":"string","total_marks":number,"duration":"string e.g. 3 Hours","general_instructions":["string"],"sections":[{"name":"string","instructions":"string, brief","questions":[{"number":number,"text":"string","marks":number}]}]},"topic_wise":[{"topic":"string","question_count":number,"questions":["string"]}],"highly_predicted":[{"question":"string","topic":"string","confidence":"Very High|High|Medium","reason":"string, max 20 words"}]}
 
-Keep the paper realistic in length for the subject and level. Output must be valid parseable JSON and nothing else.`;
+Keep the paper realistic in length for the subject and level. Output must be valid parseable JSON and nothing else. Do not use LaTeX backslashes or other unescaped backslash characters inside JSON strings; write mathematical expressions in plain text instead.`;
 
 const PDF_EXTRACT_PROMPT = `Extract ALL readable content from this question-paper PDF, especially every previous-year question. This may be a scanned/image-only PDF, so use visual understanding/OCR when necessary. Preserve question wording, numbering, section names, marks, and year labels when visible. Do not summarize, omit, or invent questions. Return plain text only, with one question or meaningful line per line.`;
 
@@ -26,10 +26,7 @@ async function geminiText(parts, generationConfig = {}) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig,
-      }),
+      body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig }),
     }
   );
 
@@ -45,6 +42,28 @@ async function geminiText(parts, generationConfig = {}) {
     .map((part) => part.text || '')
     .join('')
     .trim();
+}
+
+function parseGeminiJson(text) {
+  let clean = text.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+  const start = clean.indexOf('{');
+  const end = clean.lastIndexOf('}');
+  if (start !== -1 && end !== -1) clean = clean.slice(start, end + 1);
+
+  try {
+    return JSON.parse(clean);
+  } catch (firstError) {
+    // Gemini occasionally returns LaTeX-like sequences such as \u, \f, \(, or \sqrt
+    // inside JSON strings. JSON only permits a small set of backslash escapes.
+    // Escape invalid backslashes before the second parse attempt.
+    const repaired = clean.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+    try {
+      return JSON.parse(repaired);
+    } catch {
+      console.error('Invalid Gemini JSON:', firstError.message, clean.slice(0, 2000));
+      throw new Error('The AI returned an invalid JSON response. Please try again.');
+    }
+  }
 }
 
 export async function GET() {
@@ -96,7 +115,6 @@ export async function POST(request) {
 
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // Fast path for normal digital/text PDFs.
         try {
           const parsedPdf = await pdfParse(buffer);
           pyqText = (parsedPdf.text || '').trim();
@@ -104,7 +122,6 @@ export async function POST(request) {
           console.warn('Normal PDF parsing failed; falling back to Gemini PDF vision:', pdfError);
         }
 
-        // OCR/vision fallback for scanned or image-only PDFs.
         if (!pyqText || pyqText.replace(/\s/g, '').length < 40) {
           const pdfBase64 = buffer.toString('base64');
           pyqText = await geminiText([
@@ -118,9 +135,7 @@ export async function POST(request) {
         }
 
         const pastedText = String(form.get('pyqText') || '').trim();
-        if (pastedText) {
-          pyqText = `${pyqText}\n\nAdditional questions pasted by user:\n${pastedText}`;
-        }
+        if (pastedText) pyqText = `${pyqText}\n\nAdditional questions pasted by user:\n${pastedText}`;
       } else {
         pyqText = String(form.get('pyqText') || '').trim();
       }
@@ -147,16 +162,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'The AI engine returned an empty response.' }, { status: 502 });
     }
 
-    let clean = text.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-    let parsed;
-    try {
-      parsed = JSON.parse(clean);
-    } catch {
-      const start = clean.indexOf('{');
-      const end = clean.lastIndexOf('}');
-      if (start === -1 || end === -1) throw new Error('Could not parse AI response.');
-      parsed = JSON.parse(clean.slice(start, end + 1));
-    }
+    const parsed = parseGeminiJson(text);
 
     let sessionId = null;
     const supabaseAdmin = getSupabaseAdmin();
