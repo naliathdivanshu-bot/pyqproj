@@ -7,6 +7,7 @@ export default function Home() {
   const [subject, setSubject] = useState('');
   const [batch, setBatch] = useState('');
   const [pyqText, setPyqText] = useState('');
+  const [pdfFile, setPdfFile] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -18,22 +19,39 @@ export default function Home() {
   }, []);
 
   async function handleGenerate() {
-    if (!pyqText.trim()) {
-      setError('Paste at least a few previous year questions before analyzing.');
+    if (!pyqText.trim() && !pdfFile) {
+      setError('Upload a PYQ PDF or paste at least a few previous year questions.');
       return;
     }
     setError('');
     setLoading(true);
+
     try {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ classGrade, subject, batch, pyqText }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Something went wrong.');
+      let res;
+
+      if (pdfFile) {
+        const formData = new FormData();
+        formData.append('classGrade', classGrade);
+        formData.append('subject', subject);
+        formData.append('batch', batch);
+        formData.append('pdf', pdfFile);
+        if (pyqText.trim()) formData.append('pyqText', pyqText);
+
+        res = await fetch('/api/analyze', {
+          method: 'POST',
+          body: formData,
+        });
+      } else {
+        res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ classGrade, subject, batch, pyqText }),
+        });
       }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+
       setResult(data.result);
       setActiveTab('paper');
     } catch (err) {
@@ -48,8 +66,15 @@ export default function Home() {
     setSubject('');
     setBatch('');
     setPyqText('');
+    setPdfFile(null);
     setResult(null);
     setError('');
+  }
+
+  function handlePdfChange(e) {
+    const file = e.target.files?.[0] || null;
+    setError('');
+    setPdfFile(file);
   }
 
   return (
@@ -57,7 +82,7 @@ export default function Home() {
       <div className="masthead">
         <span className="code">{formCode}</span>
         <h1>PYQ Predictor</h1>
-        <p>Paste previous year questions · get an AI-predicted paper</p>
+        <p>Upload or paste previous year questions · get an AI-predicted paper</p>
         {result && (
           <div>
             <span className="stamp">Analysis Complete</span>
@@ -99,8 +124,41 @@ export default function Home() {
             />
           </div>
         </div>
+
+        <div className="pdf-upload-box">
+          <div className="pdf-upload-head">
+            <div>
+              <label htmlFor="pdfFile">Upload PYQ PDF</label>
+              <div className="pdf-subtext">Text-based PDF · maximum 4 MB</div>
+            </div>
+            <span className="pdf-or">OR</span>
+            <label className="file-button" htmlFor="pdfFile">Choose PDF</label>
+          </div>
+          <input
+            id="pdfFile"
+            type="file"
+            accept="application/pdf,.pdf"
+            onChange={handlePdfChange}
+            hidden
+          />
+          {pdfFile && (
+            <div className="file-selected">
+              <span>📄 {pdfFile.name}</span>
+              <button
+                type="button"
+                className="remove-file"
+                onClick={() => setPdfFile(null)}
+              >
+                Remove
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="paste-divider"><span>OR PASTE QUESTIONS MANUALLY</span></div>
+
         <div>
-          <label htmlFor="pyqText">Paste previous year questions</label>
+          <label htmlFor="pyqText">Previous year questions</label>
           <textarea
             id="pyqText"
             placeholder={
@@ -109,8 +167,9 @@ export default function Home() {
             value={pyqText}
             onChange={(e) => setPyqText(e.target.value)}
           />
-          <div className="hint">More years and questions you paste in, the more accurate the prediction.</div>
+          <div className="hint">Upload a PDF OR paste questions. If both are provided, the pasted text is added to the extracted PDF text.</div>
         </div>
+
         <div className="actions">
           <button className="btn-primary" onClick={handleGenerate} disabled={loading}>
             {loading ? 'Analyzing…' : 'Analyze & Predict'}
@@ -120,7 +179,7 @@ export default function Home() {
           </button>
           {loading && (
             <div className="status-box">
-              <span className="spinner"></span> Analyzing patterns across your PYQs…
+              <span className="spinner"></span> Extracting questions and analyzing patterns…
             </div>
           )}
         </div>
@@ -163,8 +222,7 @@ export default function Home() {
       )}
 
       <footer>
-        AI-generated predictions based on patterns in the PYQs you provide — always cross-check with your syllabus
-        before relying on it.
+        AI-generated predictions based on patterns in the PYQs you provide — always cross-check with your syllabus before relying on it.
       </footer>
     </div>
   );
@@ -185,9 +243,7 @@ function PredictedPaperTab({ result }) {
       {result.subject_summary && <div className="summary-box">{result.subject_summary}</div>}
       {p.general_instructions && p.general_instructions.length > 0 && (
         <ol className="instructions">
-          {p.general_instructions.map((instr, i) => (
-            <li key={i}>{instr}</li>
-          ))}
+          {p.general_instructions.map((instr, i) => <li key={i}>{instr}</li>)}
         </ol>
       )}
       {sections.map((sec, sIdx) => (
@@ -219,9 +275,7 @@ function TopicsTab({ result }) {
             <span className="topic-count">{t.question_count ?? (t.questions || []).length} Qs</span>
           </summary>
           <ul className="topic-q-list">
-            {(t.questions || []).map((q, qi) => (
-              <li key={qi}>{q}</li>
-            ))}
+            {(t.questions || []).map((q, qi) => <li key={qi}>{q}</li>)}
           </ul>
         </details>
       ))}
