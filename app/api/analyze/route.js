@@ -5,7 +5,8 @@ import pdfParse from 'pdf-parse';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const MODEL = 'gemini-3.6-flash';
+// Free-tier friendly models. 2.5 Flash is multimodal and handles both PDF OCR and analysis.
+const MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite'];
 
 const SYSTEM_PROMPT = `You are an expert exam analyst who studies previous year question papers (PYQs) for Indian school, college and competitive exams, and predicts likely future papers.
 Given a set of PYQs with class/grade, subject and batch/module, do three things:
@@ -21,27 +22,47 @@ Keep the paper realistic in length for the subject and level. Output must be val
 const PDF_EXTRACT_PROMPT = `Extract ALL readable content from this question-paper PDF, especially every previous-year question. This may be a scanned/image-only PDF, so use visual understanding/OCR when necessary. Preserve question wording, numbering, section names, marks, and year labels when visible. Do not summarize, omit, or invent questions. Return plain text only, with one question or meaningful line per line.`;
 
 async function geminiText(parts, generationConfig = {}) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig }),
-    }
-  );
+  let lastError = null;
 
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error('Gemini API error:', errText);
-    throw new Error('The AI engine could not be reached. Please try again.');
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig }),
+          }
+        );
+
+        if (res.ok) {
+          const data = await res.json();
+          const text = (data.candidates || [])
+            .flatMap((candidate) => candidate.content?.parts || [])
+            .map((part) => part.text || '')
+            .join('')
+            .trim();
+          if (text) return text;
+          throw new Error(`${model} returned an empty response.`);
+        }
+
+        const errText = await res.text();
+        lastError = new Error(`${model} API error: ${errText}`);
+        console.error(lastError.message);
+
+        // 429/503 are usually temporary. Retry the same model once, then try the fallback.
+        if (res.status !== 429 && res.status !== 503) break;
+        await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
+      } catch (err) {
+        lastError = err;
+        console.error('Gemini request failed:', err);
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    }
   }
 
-  const data = await res.json();
-  return (data.candidates || [])
-    .flatMap((candidate) => candidate.content?.parts || [])
-    .map((part) => part.text || '')
-    .join('')
-    .trim();
+  throw new Error('The AI service is temporarily busy. Please try again in a few seconds.');
 }
 
 function parseGeminiJson(text) {
@@ -53,9 +74,8 @@ function parseGeminiJson(text) {
   try {
     return JSON.parse(clean);
   } catch (firstError) {
-    // Gemini occasionally returns LaTeX-like sequences such as \u, \f, \(, or \sqrt
+    // Gemini can occasionally return LaTeX-like sequences such as \u, \f, \(, or \sqrt
     // inside JSON strings. JSON only permits a small set of backslash escapes.
-    // Escape invalid backslashes before the second parse attempt.
     const repaired = clean.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
     try {
       return JSON.parse(repaired);
