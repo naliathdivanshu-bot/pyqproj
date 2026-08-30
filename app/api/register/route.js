@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Registration uses the project's public Supabase credentials. RLS on the
+// students table permits INSERT only, so these credentials cannot expose or
+// modify existing student records.
+const SUPABASE_URL = 'https://mvajgodvlpcgbzurvnvr.supabase.co';
+const SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im12YWpnb2R2bHBjZ2J6dXJ2bnZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1NTE5MzMsImV4cCI6MjEwMjEyNzkzM30.Lr2XJXoGs9ElAU8x8DcgiYngYEcG-JjE9BtMuuEOLYo';
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -18,32 +25,22 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
     }
 
-    // Support both the current public URL variable and the legacy server-only name.
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      console.error('Missing Supabase server environment variables', {
-        hasUrl: Boolean(supabaseUrl),
-        hasServiceRoleKey: Boolean(serviceRoleKey),
-      });
-      return NextResponse.json({ error: 'Registration service is not configured yet.' }, { status: 500 });
-    }
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const { error } = await supabase
       .from('students')
-      .upsert(
-        { full_name, email, course, state, college },
-        { onConflict: 'email' }
-      );
+      .insert({ full_name, email, course, state, college });
 
-    if (error) {
-      console.error('Student registration failed:', error.message);
-      return NextResponse.json({ error: 'Could not save your details. Please try again.' }, { status: 500 });
+    // A returning student may already exist. The registration screen should
+    // still allow that student to continue without exposing or updating data.
+    if (error && error.code !== '23505') {
+      console.error('Student registration failed:', error.message, error.code);
+      return NextResponse.json(
+        { error: 'Could not save your details. Please try again.' },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true });
