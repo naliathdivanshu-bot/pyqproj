@@ -1,5 +1,6 @@
 import './globals.css';
 import './dashboard.css';
+import './hero-motion.css';
 import RegistrationGate from './registration-gate';
 
 export const metadata = {
