@@ -1,5 +1,6 @@
 import './globals.css';
 import './dashboard.css';
+import RegistrationGate from './registration-gate';
 
 export const metadata = {
   title: 'PYQ Predictor',
@@ -12,11 +13,11 @@ export default function RootLayout({ children }) {
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Bitter:ital,wght@0,500;0,600;0,700;1,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Bitter:ital,wght@0,500;0,600;0,700;1,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body><RegistrationGate>{children}</RegistrationGate></body>
     </html>
   );
 }
