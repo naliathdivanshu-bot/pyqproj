@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function Home() {
   const [classGrade, setClassGrade] = useState('');
@@ -12,6 +12,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('paper');
+  const [intro, setIntro] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIntro(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   async function handleGenerate() {
     if (!pyqText.trim() && !pdfFile) { setError('Upload a PYQ PDF or paste at least a few previous year questions.'); return; }
@@ -36,7 +42,17 @@ export default function Home() {
   function handleReset() { setClassGrade(''); setSubject(''); setBatch(''); setPyqText(''); setPdfFile(null); setResult(null); setError(''); }
   function handlePdfChange(e) { setError(''); setPdfFile(e.target.files?.[0] || null); }
 
-  return <div className="wrap">
+  return <>
+    {intro && <div className="intro-screen" aria-label="Loading PYQ Predictor">
+      <div className="intro-stars" />
+      <div className="intro-shards"><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /></div>
+      <div className="intro-ring ring-a" /><div className="intro-ring ring-b" /><div className="intro-ring ring-c" />
+      <div className="intro-core"><span>✦</span></div>
+      <div className="intro-flash" />
+      <div className="intro-wordmark"><b>PYQ</b> Predictor</div>
+    </div>}
+
+    <div className={'wrap ' + (intro ? 'site-loading' : 'site-ready')}>
     <nav className="nav">
       <div className="brand">✦ PYQ <span>Predictor</span></div>
       <div className="nav-links"><a href="#analyze">Analyze</a><a href="#how">How it works</a><a href="#results">Predictions</a></div>
@@ -88,7 +104,8 @@ export default function Home() {
 
     <section className="stats"><div className="stat"><b>AI</b><span>Pattern Analysis</span></div><div className="stat"><b>PDF</b><span>OCR Supported</span></div><div className="stat"><b>24/7</b><span>Study Assistant</span></div><div className="stat"><b>∞</b><span>Questions to Analyze</span></div></section>
     <footer>AI-generated predictions are based on the PYQs you provide. Always cross-check important topics with your official syllabus.</footer>
-  </div>;
+    </div>
+  </>;
 }
 
 function PredictedPaperTab({ result }) { const p = result.predicted_paper || {}; return <div className="paper-sheet"><div className="paper-head"><h3>{p.title || 'Predicted Question Paper'}</h3><div className="paper-meta"><span>TIME: {p.duration || '—'}</span><span>MAX MARKS: {p.total_marks ?? '—'}</span></div></div>{result.subject_summary && <div className="summary-box">{result.subject_summary}</div>}{p.general_instructions?.length > 0 && <ol>{p.general_instructions.map((x,i)=><li key={i}>{x}</li>)}</ol>}{(p.sections || []).map((sec,i)=><div className="section-block" key={i}><h4>{sec.name || 'Section'}</h4>{sec.instructions && <p className="section-instr">{sec.instructions}</p>}{(sec.questions || []).map((q,j)=><div className="q-row" key={j}><span className="q-num">Q{q.number ?? ''}.</span><span className="q-text">{q.text}</span><span className="q-marks">[{q.marks ?? '—'}]</span></div>)}</div>)}</div>; }
