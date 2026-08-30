@@ -18,10 +18,15 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
     }
 
-    const supabaseUrl = process.env.SUPABASE_URL;
+    // Support both the current public URL variable and the legacy server-only name.
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
     if (!supabaseUrl || !serviceRoleKey) {
-      console.error('Missing Supabase server environment variables');
+      console.error('Missing Supabase server environment variables', {
+        hasUrl: Boolean(supabaseUrl),
+        hasServiceRoleKey: Boolean(serviceRoleKey),
+      });
       return NextResponse.json({ error: 'Registration service is not configured yet.' }, { status: 500 });
     }
 
