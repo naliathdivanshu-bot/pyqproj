@@ -1,13 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Registration uses the project's public Supabase credentials. RLS on the
-// students table permits INSERT only, so these credentials cannot expose or
-// modify existing student records.
-const SUPABASE_URL = 'https://mvajgodvlpcgbzurvnvr.supabase.co';
-const SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdWJhYmFzZSIsInJlZiI6Im12YWpnb2R2bHBjZ2J6dXJ2bnZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1NTE5MzMsImV4cCI6MjEwMjEyNzkzM30.Lr2XJXoGs9ElAU8x8DcgiYngYEcG-JjE9BtMuuEOLYo';
-
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -49,12 +42,7 @@ async function sendRegistrationEmail(student) {
       to: [recipient],
       reply_to: student.email,
       subject: `New PYQ Predictor registration — ${student.full_name}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#111827">
-          <h2 style="margin-bottom:8px">🎓 New student registration</h2>
-          <p style="color:#4b5563">A student has registered on PYQ Predictor.</p>
-          <table style="width:100%;border-collapse:collapse;margin-top:18px">${rows}</table>
-        </div>`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#111827"><h2 style="margin-bottom:8px">🎓 New student registration</h2><p style="color:#4b5563">A student has registered on PYQ Predictor.</p><table style="width:100%;border-collapse:collapse;margin-top:18px">${rows}</table></div>`,
     }),
   });
 
@@ -78,30 +66,35 @@ export async function POST(request) {
     if (!full_name || !email || !course || !state || !college) {
       return NextResponse.json({ error: 'Please complete all fields.' }, { status: 400 });
     }
-
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
     }
 
+    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const supabaseKey = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
+
+    if (!SUPABASE_URL || !supabaseKey) {
+      console.error('Supabase registration is not configured: missing URL or key.');
+      return NextResponse.json({ error: 'Registration service is not configured.' }, { status: 500 });
+    }
+
     const student = { full_name, email, course, state, college };
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    const supabase = createClient(SUPABASE_URL, supabaseKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const { error } = await supabase.from('students').insert(student);
 
-    // A returning student may already exist. The registration screen should
-    // still allow that student to continue without exposing or updating data.
     if (error && error.code !== '23505') {
-      console.error('Student registration failed:', error.message, error.code);
+      console.error('Student registration failed:', error.message, error.code, error.details);
       return NextResponse.json(
         { error: 'Could not save your details. Please try again.' },
         { status: 500 }
       );
     }
 
-    // Email forwarding is best-effort: a temporary email-provider problem must
-    // not stop a student from using the app after their registration is saved.
     let emailForwarded = false;
     try {
       const result = await sendRegistrationEmail(student);
