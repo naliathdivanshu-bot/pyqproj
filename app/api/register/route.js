@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Registration uses this project's public Supabase API credentials. The table
+// is protected by RLS and only permits INSERT for the anon role.
+const SUPABASE_URL = 'https://mvajgodvlpcgbzurvnvr.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yqKpbo4mqCSYWrQe0f2vKA__8UZ-r5U';
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -13,21 +18,12 @@ export async function POST(request) {
     if (!full_name || !email || !course || !state || !college) {
       return NextResponse.json({ error: 'Please complete all fields.' }, { status: 400 });
     }
+
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
     }
 
-    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const supabaseKey = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
-
-    if (!SUPABASE_URL || !supabaseKey) {
-      console.error('Supabase registration is not configured: missing URL or key.');
-      return NextResponse.json({ error: 'Registration service is not configured.' }, { status: 500 });
-    }
-
-    const supabase = createClient(SUPABASE_URL, supabaseKey, {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
