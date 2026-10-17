@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
+
+const RegistrationContext = createContext(null);
 
 const fields = [
   ['full_name', 'Full Name', 'Your full name'],
@@ -10,8 +12,15 @@ const fields = [
   ['college', 'College / University', 'Your college name'],
 ];
 
+export function useRegistration() {
+  const registration = useContext(RegistrationContext);
+  if (!registration) throw new Error('useRegistration must be used inside RegistrationGate.');
+  return registration;
+}
+
 export default function RegistrationGate({ children }) {
-  const [ready, setReady] = useState(false);
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   const [profile, setProfile] = useState({ full_name:'', email:'', course:'', state:'', college:'' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -19,68 +28,92 @@ export default function RegistrationGate({ children }) {
   useEffect(() => {
     try {
       const saved = localStorage.getItem('pyq_student_registered');
-      if (saved) setReady(true);
+      if (saved) setIsRegistered(true);
     } catch {}
   }, []);
 
-  useEffect(() => {
-    const pointerIsAvailable = window.matchMedia('(hover: hover) and (pointer: fine)');
-    if (!pointerIsAvailable.matches || ready) return;
-
-    const root = document.documentElement;
-    let frameId;
-
-    const updatePointerGlow = ({ clientX, clientY }) => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        root.style.setProperty('--pointer-x', `${clientX}px`);
-        root.style.setProperty('--pointer-y', `${clientY}px`);
-      });
-    };
-
-    window.addEventListener('pointermove', updatePointerGlow, { passive: true });
-    return () => {
-      window.removeEventListener('pointermove', updatePointerGlow);
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [ready]);
-
-  function change(key, value) { setProfile(p => ({ ...p, [key]: value })); }
-
-  async function submit(e) {
-    e.preventDefault();
+  function openRegistration() {
     setError('');
-    setSaving(true);
-    try {
-      const res = await fetch('/api/register', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Registration could not be completed.');
-      localStorage.setItem('pyq_student_registered', JSON.stringify(profile));
-      setReady(true);
-    } catch (err) {
-      setError(err.message || 'Something went wrong. Please try again.');
-    } finally { setSaving(false); }
+    setIsOpen(true);
   }
 
-  if (ready) return children;
-  return <main className="registration-shell">
-    <div className="registration-glow one" /><div className="registration-glow two" />
-    <section className="registration-card">
-      <div className="registration-brand">✦ PYQ <span>Predictor</span></div>
-      <div className="registration-eyebrow">STUDENT ACCESS</div>
-      <h1>Welcome to your <em>PYQ intelligence lab.</em></h1>
-      <p>Tell us a little about yourself to unlock personalized exam preparation.</p>
-      <form onSubmit={submit}>
-        <div className="registration-grid">
-          {fields.map(([key, label, placeholder]) => <label key={key}>{label}<input required type={key === 'email' ? 'email' : 'text'} value={profile[key]} placeholder={placeholder} onChange={e => change(key, e.target.value)} /></label>)}
+  function closeRegistration() {
+    if (!saving) setIsOpen(false);
+  }
+
+  function change(key, value) {
+    setProfile(currentProfile => ({ ...currentProfile, [key]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+    setSaving(true);
+
+    try {
+      const response = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Registration could not be completed.');
+
+      localStorage.setItem('pyq_student_registered', JSON.stringify(profile));
+      setIsRegistered(true);
+      setIsOpen(false);
+    } catch (submitError) {
+      setError(submitError.message || 'Something went wrong. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <RegistrationContext.Provider value={{ isRegistered, openRegistration }}>
+      {children}
+      {isOpen && (
+        <div
+          className="registration-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="registration-title"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closeRegistration();
+          }}
+        >
+          <div className="registration-glow one" />
+          <div className="registration-glow two" />
+          <section className="registration-card">
+            <button className="registration-close" type="button" aria-label="Close student details form" onClick={closeRegistration}>×</button>
+            <div className="registration-brand">✦ PYQ <span>Predictor</span></div>
+            <div className="registration-eyebrow">STUDENT ACCESS</div>
+            <h1 id="registration-title">One quick step before your <em>AI analysis.</em></h1>
+            <p>Save your details once to unlock unlimited PYQ analyses and keep your preparation personalized.</p>
+            <form onSubmit={submit}>
+              <div className="registration-grid">
+                {fields.map(([key, label, placeholder]) => (
+                  <label key={key}>
+                    {label}
+                    <input
+                      required
+                      type={key === 'email' ? 'email' : 'text'}
+                      value={profile[key]}
+                      placeholder={placeholder}
+                      onChange={event => change(key, event.target.value)}
+                    />
+                  </label>
+                ))}
+              </div>
+              {error && <div className="registration-error">{error}</div>}
+              <button disabled={saving} type="submit">
+                {saving ? 'Saving your details…' : 'Unlock & Analyze →'}
+              </button>
+            </form>
+            <small>🔒 You only need to complete this once. Your current analysis will continue automatically.</small>
+          </section>
         </div>
-        {error && <div className="registration-error">{error}</div>}
-        <button disabled={saving} type="submit">{saving ? 'Saving your details…' : 'Continue to PYQ Predictor →'}</button>
-      </form>
-      <small>🔒 Your information is used to personalize your experience and improve the service.</small>
-    </section>
-  </main>;
+      )}
+    </RegistrationContext.Provider>
+  );
 }
