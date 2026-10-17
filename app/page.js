@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useRegistration } from './registration-gate';
 
 const ANALYSIS_STEPS = [
   'Reading your PYQ data…',
@@ -11,6 +12,8 @@ const ANALYSIS_STEPS = [
 ];
 
 export default function Home() {
+  const { isRegistered, openRegistration } = useRegistration();
+  const pendingAnalysis = useRef(false);
   const [classGrade, setClassGrade] = useState('');
   const [subject, setSubject] = useState('');
   const [batch, setBatch] = useState('');
@@ -58,11 +61,28 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [loading]);
 
+  useEffect(() => {
+    if (!isRegistered || !pendingAnalysis.current) return;
+    pendingAnalysis.current = false;
+    void runAnalysis();
+  }, [isRegistered]);
+
   async function handleGenerate() {
     if (!pyqText.trim() && !pdfFile) {
       setError('Upload a PYQ PDF or paste at least a few previous year questions.');
       return;
     }
+
+    if (!isRegistered) {
+      pendingAnalysis.current = true;
+      openRegistration();
+      return;
+    }
+
+    await runAnalysis();
+  }
+
+  async function runAnalysis() {
     setError('');
     setLoading(true);
     try {
