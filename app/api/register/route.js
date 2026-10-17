@@ -1,32 +1,50 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 
-// Registration uses this project's public Supabase API credentials. The table
-// is protected by RLS and only permits INSERT for the anon role.
-const SUPABASE_URL = 'https://mvajgodvlpcgbzurvnvr.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yqKpbo4mqCSYWrQe0f2vKA__8UZ-r5U';
+export const runtime = 'nodejs';
+
+function isServiceUnavailable(error) {
+  const message = String(error?.message || '');
+  return error?.cause?.code === 'ENOTFOUND' || /(?:fetch failed|ENOTFOUND|network)/i.test(message);
+}
+
+function unavailableResponse() {
+  return NextResponse.json(
+    { error: 'Registration is temporarily unavailable. Please try again in a moment.' },
+    { status: 503 }
+  );
+}
 
 export async function POST(request) {
+  let body;
+
   try {
-    const body = await request.json();
-    const full_name = String(body.full_name || '').trim();
-    const email = String(body.email || '').trim().toLowerCase();
-    const course = String(body.course || '').trim();
-    const state = String(body.state || '').trim();
-    const college = String(body.college || '').trim();
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid registration request.' }, { status: 400 });
+  }
 
-    if (!full_name || !email || !course || !state || !college) {
-      return NextResponse.json({ error: 'Please complete all fields.' }, { status: 400 });
-    }
+  const full_name = String(body.full_name || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const course = String(body.course || '').trim();
+  const state = String(body.state || '').trim();
+  const college = String(body.college || '').trim();
 
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
-    }
+  if (!full_name || !email || !course || !state || !college) {
+    return NextResponse.json({ error: 'Please complete all fields.' }, { status: 400 });
+  }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
+  }
 
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    console.error('Student registration unavailable: Supabase server configuration is missing.');
+    return unavailableResponse();
+  }
+
+  try {
     const { error } = await supabase
       .from('students')
       .insert({ full_name, email, course, state, college });
@@ -34,16 +52,31 @@ export async function POST(request) {
     // A returning student may already exist. Allow them to continue without
     // exposing or updating the existing record.
     if (error && error.code !== '23505') {
-      console.error('Student registration failed:', error.message, error.code, error.details);
-      return NextResponse.json(
-        { error: 'Could not save your details. Please try again.' },
-        { status: 500 }
-      );
+      const unavailable = isServiceUnavailable(error);
+      console.error('Student registration failed', {
+        code: error.code || null,
+        unavailable,
+      });
+      return unavailable
+        ? unavailableResponse()
+        : NextResponse.json(
+            { error: 'Could not save your details. Please try again.' },
+            { status: 500 }
+          );
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Registration request failed:', error);
-    return NextResponse.json({ error: 'Invalid registration request.' }, { status: 400 });
+    const unavailable = isServiceUnavailable(error);
+    console.error('Student registration request failed', {
+      name: error instanceof Error ? error.name : 'UnknownError',
+      unavailable,
+    });
+    return unavailable
+      ? unavailableResponse()
+      : NextResponse.json(
+          { error: 'Could not save your details. Please try again.' },
+          { status: 500 }
+        );
   }
 }
