@@ -21,14 +21,11 @@ create table if not exists students (
 );
 
 -- Row Level Security: locked down by default.
--- Session writes happen only from the server route using privileged credentials.
+-- Session and registration writes happen only through server routes using
+-- SUPABASE_SERVICE_ROLE_KEY. Do not add anon/authenticated policies here.
 alter table pyq_sessions enable row level security;
 alter table students enable row level security;
 
--- Student registration is intentionally limited to inserts only. No public
--- read or update access is granted.
+-- Remove the legacy public INSERT policy. Existing student records are
+-- retained; only server-side registration can create future records.
 drop policy if exists "Allow public student registration inserts" on students;
-create policy "Allow public student registration inserts"
-on students for insert
-to anon, authenticated
-with check (true);
