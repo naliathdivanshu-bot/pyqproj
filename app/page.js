@@ -29,6 +29,30 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const pointerIsAvailable = window.matchMedia('(hover: hover) and (pointer: fine)');
+    if (!pointerIsAvailable.matches) return;
+
+    const root = document.documentElement;
+    let frameId;
+
+    const updatePointerGlow = ({ clientX, clientY }) => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        root.style.setProperty('--pointer-x', `${clientX}px`);
+        root.style.setProperty('--pointer-y', `${clientY}px`);
+      });
+    };
+
+    window.addEventListener('pointermove', updatePointerGlow, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', updatePointerGlow);
+      window.cancelAnimationFrame(frameId);
+      root.style.removeProperty('--pointer-x');
+      root.style.removeProperty('--pointer-y');
+    };
+  }, []);
+
+  useEffect(() => {
     if (!loading) { setAnalysisStep(0); return; }
     const timer = window.setInterval(() => setAnalysisStep(s => Math.min(s + 1, ANALYSIS_STEPS.length - 1)), 950);
     return () => window.clearInterval(timer);
