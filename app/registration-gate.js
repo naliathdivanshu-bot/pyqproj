@@ -23,6 +23,28 @@ export default function RegistrationGate({ children }) {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    const pointerIsAvailable = window.matchMedia('(hover: hover) and (pointer: fine)');
+    if (!pointerIsAvailable.matches || ready) return;
+
+    const root = document.documentElement;
+    let frameId;
+
+    const updatePointerGlow = ({ clientX, clientY }) => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        root.style.setProperty('--pointer-x', `${clientX}px`);
+        root.style.setProperty('--pointer-y', `${clientY}px`);
+      });
+    };
+
+    window.addEventListener('pointermove', updatePointerGlow, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', updatePointerGlow);
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [ready]);
+
   function change(key, value) { setProfile(p => ({ ...p, [key]: value })); }
 
   async function submit(e) {
