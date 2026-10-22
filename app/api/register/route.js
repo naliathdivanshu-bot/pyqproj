@@ -34,7 +34,9 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Please complete all fields.' }, { status: 400 });
   }
 
-  if (!/^\\S+@\\S+\\.\\S+$/.test(email)) {
+  // Accept standard email addresses, including university domains such as user@gkv.ac.in.
+  // Keep this intentionally simple; detailed mailbox verification is not possible here.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
   }
 
