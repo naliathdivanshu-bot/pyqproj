@@ -102,7 +102,14 @@ export default function Home() {
           body: JSON.stringify({ classGrade, subject, batch, pyqText }),
         });
       }
-      const data = await res.json();
+      const responseText = await res.text();
+      let data;
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        console.error('Analysis API returned a non-JSON response:', responseText.slice(0, 300));
+        throw new Error('The analysis service returned an unexpected response. Please try again in a moment.');
+      }
       if (!res.ok) throw new Error(data.error || 'Something went wrong.');
       setResult(data.result);
       setActiveTab('dashboard');
