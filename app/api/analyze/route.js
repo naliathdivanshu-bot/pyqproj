@@ -5,8 +5,8 @@ import pdfParse from 'pdf-parse';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Free-tier friendly models. 2.5 Flash is multimodal and handles both PDF OCR and analysis.
-const MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite'];
+// Use currently supported Gemini API models, with a fallback for availability/rate limits.
+const MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash'];
 
 const SYSTEM_PROMPT = `You are an expert exam analyst who studies previous year question papers (PYQs) for Indian school, college and competitive exams, and predicts likely future papers.
 Given a set of PYQs with class/grade, subject and batch/module, do three things:
@@ -51,8 +51,7 @@ async function geminiText(parts, generationConfig = {}) {
         lastError = new Error(`${model} API error: ${errText}`);
         console.error(lastError.message);
 
-        // 429/503 are usually temporary. Retry the same model once, then try the fallback.
-        if (res.status !== 429 && res.status !== 503) break;
+        if (![429, 500, 502, 503, 504].includes(res.status)) break;
         await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
       } catch (err) {
         lastError = err;
@@ -62,11 +61,11 @@ async function geminiText(parts, generationConfig = {}) {
     }
   }
 
-  throw new Error('The AI service is temporarily busy. Please try again in a few seconds.');
+  throw new Error('The AI service is temporarily busy or unavailable. Please try again in a few seconds.');
 }
 
 function parseGeminiJson(text) {
-  let clean = text.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+  let clean = text.replace(/^\x60\x60\x60json/i, '').replace(/^\x60\x60\x60/, '').replace(/\x60\x60\x60$/, '').trim();
   const start = clean.indexOf('{');
   const end = clean.lastIndexOf('}');
   if (start !== -1 && end !== -1) clean = clean.slice(start, end + 1);
@@ -74,9 +73,7 @@ function parseGeminiJson(text) {
   try {
     return JSON.parse(clean);
   } catch (firstError) {
-    // Gemini can occasionally return LaTeX-like sequences such as \u, \f, \(, or \sqrt
-    // inside JSON strings. JSON only permits a small set of backslash escapes.
-    const repaired = clean.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+    const repaired = clean.replace(/\\\\(?!["\\\\/bfnrtu])/g, '\\\\\\');
     try {
       return JSON.parse(repaired);
     } catch {
@@ -139,7 +136,7 @@ export async function POST(request) {
           const parsedPdf = await pdfParse(buffer);
           pyqText = (parsedPdf.text || '').trim();
         } catch (pdfError) {
-          console.warn('Normal PDF parsing failed; falling back to Gemini PDF vision:', pdfError);
+          console.warn('Normal PDF parsing failed; falling back to Gemini PDF vision:', pdfError?.message || 'PDF parse error');
         }
 
         if (!pyqText || pyqText.replace(/\s/g, '').length < 40) {
@@ -161,10 +158,10 @@ export async function POST(request) {
       }
     } else {
       const body = await request.json();
-      classGrade = (body.classGrade || '').trim();
-      subject = (body.subject || '').trim();
-      batch = (body.batch || '').trim();
-      pyqText = (body.pyqText || '').trim();
+      classGrade = String(body.classGrade || '').trim();
+      subject = String(body.subject || '').trim();
+      batch = String(body.batch || '').trim();
+      pyqText = String(body.pyqText || '').trim();
     }
 
     if (!pyqText) {
