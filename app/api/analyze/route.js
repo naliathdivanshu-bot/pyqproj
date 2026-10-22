@@ -5,8 +5,8 @@ import pdfParse from 'pdf-parse';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Use currently supported Gemini API models, with a fallback for availability/rate limits.
-const MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash'];
+// Use a known Gemini API model first, then a stable fallback.
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
 const SYSTEM_PROMPT = `You are an expert exam analyst who studies previous year question papers (PYQs) for Indian school, college and competitive exams, and predicts likely future papers.
 Given a set of PYQs with class/grade, subject and batch/module, do three things:
@@ -22,64 +22,62 @@ Keep the paper realistic in length for the subject and level. Output must be val
 const PDF_EXTRACT_PROMPT = `Extract ALL readable content from this question-paper PDF, especially every previous-year question. This may be a scanned/image-only PDF, so use visual understanding/OCR when necessary. Preserve question wording, numbering, section names, marks, and year labels when visible. Do not summarize, omit, or invent questions. Return plain text only, with one question or meaningful line per line.`;
 
 async function geminiText(parts, generationConfig = {}) {
-  let lastError = null;
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('AI service is not configured. Please contact the project administrator.');
+  }
 
+  let lastStatus = 0;
   for (const model of MODELS) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig }),
-          }
-        );
-
-        if (res.ok) {
-          const data = await res.json();
-          const text = (data.candidates || [])
-            .flatMap((candidate) => candidate.content?.parts || [])
-            .map((part) => part.text || '')
-            .join('')
-            .trim();
-          if (text) return text;
-          throw new Error(`${model} returned an empty response.`);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig }),
         }
+      );
 
-        const errText = await res.text();
-        lastError = new Error(`${model} API error: ${errText}`);
-        console.error(lastError.message);
-
-        if (![429, 500, 502, 503, 504].includes(res.status)) break;
-        await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
-      } catch (err) {
-        lastError = err;
-        console.error('Gemini request failed:', err);
-        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700));
+      if (res.ok) {
+        const data = await res.json();
+        const text = (data.candidates || [])
+          .flatMap(candidate => candidate.content?.parts || [])
+          .map(part => part.text || '')
+          .join('')
+          .trim();
+        if (text) return text;
+        lastStatus = res.status;
+        console.error('Gemini returned an empty response for model:', model);
+        continue;
       }
+
+      lastStatus = res.status;
+      const details = await res.text();
+      console.error('Gemini API request failed:', { model, status: res.status, details: details.slice(0, 500) });
+      // Try fallback for model availability, quota and transient server errors.
+      if (![400, 403, 404, 429, 500, 502, 503, 504].includes(res.status)) break;
+    } catch (error) {
+      console.error('Gemini network request failed:', error instanceof Error ? error.message : 'Unknown error');
     }
   }
 
-  throw new Error('The AI service is temporarily busy or unavailable. Please try again in a few seconds.');
+  if (lastStatus === 429) {
+    throw new Error('The AI service is at its usage limit right now. Please wait a minute and try again.');
+  }
+  throw new Error('The AI service could not complete the analysis. Please try again shortly.');
 }
 
 function parseGeminiJson(text) {
-  let clean = text.replace(/^\x60\x60\x60json/i, '').replace(/^\x60\x60\x60/, '').replace(/\x60\x60\x60$/, '').trim();
+  let clean = text.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
   const start = clean.indexOf('{');
   const end = clean.lastIndexOf('}');
   if (start !== -1 && end !== -1) clean = clean.slice(start, end + 1);
 
   try {
     return JSON.parse(clean);
-  } catch (firstError) {
-    const repaired = clean.replace(/\\\\(?!["\\\\/bfnrtu])/g, '\\\\\\');
-    try {
-      return JSON.parse(repaired);
-    } catch {
-      console.error('Invalid Gemini JSON:', firstError.message, clean.slice(0, 2000));
-      throw new Error('The AI returned an invalid JSON response. Please try again.');
-    }
+  } catch {
+    console.error('Gemini returned invalid JSON.');
+    throw new Error('The AI response was not valid JSON. Please try again.');
   }
 }
 
@@ -97,7 +95,7 @@ export async function GET() {
     if (error) throw error;
     return NextResponse.json({ sessions: data });
   } catch (err) {
-    console.error('History fetch error:', err);
+    console.error('History fetch error:', err instanceof Error ? err.message : 'Unknown error');
     return NextResponse.json({ sessions: [] });
   }
 }
@@ -109,20 +107,14 @@ export async function POST(request) {
     let batch = '';
     let pyqText = '';
 
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ error: 'Server is missing GEMINI_API_KEY. Add it in Vercel project settings.' }, { status: 500 });
-    }
-
-    const contentType = request.headers.get('content-type') || '';
-
-    if (contentType.includes('multipart/form-data')) {
+    if (request.headers.get('content-type')?.includes('multipart/form-data')) {
       const form = await request.formData();
       classGrade = String(form.get('classGrade') || '').trim();
       subject = String(form.get('subject') || '').trim();
       batch = String(form.get('batch') || '').trim();
 
       const file = form.get('pdf');
-      if (file && typeof file === 'object' && 'arrayBuffer' in file) {
+      if (file && typeof file === 'object' && 'arrayBuffer' in file && file.size > 0) {
         if (file.type !== 'application/pdf') {
           return NextResponse.json({ error: 'Please upload a PDF file.' }, { status: 400 });
         }
@@ -131,24 +123,18 @@ export async function POST(request) {
         }
 
         const buffer = Buffer.from(await file.arrayBuffer());
-
         try {
           const parsedPdf = await pdfParse(buffer);
           pyqText = (parsedPdf.text || '').trim();
         } catch (pdfError) {
-          console.warn('Normal PDF parsing failed; falling back to Gemini PDF vision:', pdfError?.message || 'PDF parse error');
+          console.warn('Normal PDF parsing failed; using Gemini PDF OCR fallback.');
         }
 
         if (!pyqText || pyqText.replace(/\s/g, '').length < 40) {
-          const pdfBase64 = buffer.toString('base64');
           pyqText = await geminiText([
             { text: PDF_EXTRACT_PROMPT },
-            { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } },
+            { inlineData: { mimeType: 'application/pdf', data: buffer.toString('base64') } },
           ]);
-
-          if (!pyqText) {
-            return NextResponse.json({ error: 'I could not extract readable questions from this PDF. Please try another PDF.' }, { status: 422 });
-          }
         }
 
         const pastedText = String(form.get('pyqText') || '').trim();
@@ -169,16 +155,10 @@ export async function POST(request) {
     }
 
     const userPrompt = `Class/Grade: ${classGrade || 'Not specified'}\nSubject: ${subject || 'Not specified'}\nBatch/Module: ${batch || 'Not specified'}\n\nPrevious year questions extracted from the user's input/PDF:\n${pyqText}`;
-
     const text = await geminiText(
       [{ text: SYSTEM_PROMPT }, { text: userPrompt }],
       { responseMimeType: 'application/json', maxOutputTokens: 4000 }
     );
-
-    if (!text) {
-      return NextResponse.json({ error: 'The AI engine returned an empty response.' }, { status: 502 });
-    }
-
     const parsed = parseGeminiJson(text);
 
     let sessionId = null;
@@ -202,7 +182,10 @@ export async function POST(request) {
 
     return NextResponse.json({ result: parsed, sessionId });
   } catch (err) {
-    console.error('Analyze API error:', err);
-    return NextResponse.json({ error: err.message || 'Something went wrong.' }, { status: 500 });
+    console.error('Analyze API error:', err instanceof Error ? err.message : 'Unknown error');
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Analysis failed. Please try again.' },
+      { status: 500 }
+    );
   }
 }
